@@ -1,5 +1,5 @@
-from arbol import (Asignacion, Binaria, Declaracion, Escribir, Funcion, Leer, Literal,
-                   Programa, Unaria, Variable)
+from arbol import (Asignacion, Binaria, Ciclar, Declaracion, Escribir, Funcion, Hacer, Leer,
+                   Literal, Mientras, Parar, Programa, Salir, Si, Unaria, Variable)
 
 ERRORES_SINTACTICOS = {
     1: "ESPERABA FIN DE INSTRUCCION",
@@ -13,9 +13,13 @@ ERRORES_SINTACTICOS = {
     9: "ESPERABA EL NOMBRE DEL PROGRAMA",
     10: "ESPERABA * , DESPUES DE READ O PRINT",
     11: "ESPERABA UN (",
+    12: "ESPERABA THEN",
+    13: "ESPERABA END IF",
+    14: "ESPERABA END DO",
     15: "ESPERABA UNA ,",
     16: "ESPERABA PRECISION DESPUES DE DOUBLE",
     17: "ESPERABA NONE DESPUES DE IMPLICIT",
+    18: "ESPERABA UN OPERADOR RELACIONAL (==) Y SE ENCONTRO =",
     20: "INSTRUCCION DESPUES DE END PROGRAM",
 }
 
@@ -209,7 +213,99 @@ class Sintactico:
             return self.lectura()
         if self.es_palabra(token, "PRINT"):
             return self.escritura()
+        if self.es_palabra(token, "IF"):
+            return self.condicional()
+        if self.es_palabra(token, "DO"):
+            return self.ciclo()
+        if self.es_palabra(token, "EXIT"):
+            return Salir(self.token().linea)
+        if self.es_palabra(token, "CYCLE"):
+            return Ciclar(self.token().linea)
+        if self.es_palabra(token, "STOP"):
+            return Parar(self.token().linea)
         self.errores(6, token)
+
+    def condicion(self):
+        self.espera_valor("(", 11)
+        nodo = self.expresion()
+        if self.ver().tipo == "ASIGNACION":
+            self.errores(18, self.ver())
+        self.espera_valor(")", 4)
+        return nodo
+
+    def condicional(self):
+        self.regla("CONDICIONAL")
+        linea = self.token().linea
+        condicion = self.condicion()
+        token = self.ver()
+        if not self.es_palabra(token, "THEN"):
+            if token.tipo in ("FIN_LINEA", "FIN"):
+                self.errores(12, token)
+            # if logico de una sola linea: if (cond) sentencia
+            return Si([(condicion, [self.sentencia()])], None, linea, logico=True)
+        self.token()
+        self.fin_instruccion()
+
+        ramas = [(condicion, self.bloque(("END", "ELSE", "ELSEIF", "ENDIF")))]
+        sino = None
+        while True:
+            token = self.token()
+            if self.es_palabra(token, "ELSEIF") or (self.es_palabra(token, "ELSE") and self.es_palabra(self.ver(), "IF")):
+                if token.norma == "ELSE":
+                    self.token()
+                condicion = self.condicion()
+                if not self.es_palabra(self.token(), "THEN"):
+                    self.errores(12)
+                self.fin_instruccion()
+                ramas.append((condicion, self.bloque(("END", "ELSE", "ELSEIF", "ENDIF"))))
+            elif self.es_palabra(token, "ELSE"):
+                if sino is not None:
+                    self.errores(13, token)
+                self.fin_instruccion()
+                sino = self.bloque(("END", "ELSE", "ELSEIF", "ENDIF"))
+            elif self.es_palabra(token, "ENDIF"):
+                break
+            elif self.es_palabra(token, "END") and self.es_palabra(self.ver(), "IF"):
+                self.token()
+                break
+            else:
+                self.errores(13, token)
+        return Si(ramas, sino, linea)
+
+    def ciclo(self):
+        linea = self.token().linea
+        if self.es_palabra(self.ver(), "WHILE"):
+            self.regla("CICLO_WHILE")
+            self.token()
+            condicion = self.condicion()
+            self.fin_instruccion()
+            cuerpo = self.bloque(("END", "ENDDO"))
+            self.cierra_ciclo()
+            return Mientras(condicion, cuerpo, linea)
+
+        self.regla("CICLO_DO")
+        variable = self.espera_identificador()
+        self.espera_valor("=", 3)
+        inicio = self.expresion()
+        self.espera_valor(",", 15)
+        fin = self.expresion()
+        paso = None
+        if self.ver().norma == ",":
+            self.token()
+            paso = self.expresion()
+        self.fin_instruccion()
+        cuerpo = self.bloque(("END", "ENDDO"))
+        self.cierra_ciclo()
+        return Hacer(variable.valor, inicio, fin, paso, cuerpo, linea)
+
+    def cierra_ciclo(self):
+        token = self.token()
+        if self.es_palabra(token, "ENDDO"):
+            return
+        if self.es_palabra(token, "END") and self.es_palabra(self.ver(), "DO"):
+            self.token()
+            return
+        self.errores(14, token)
 
     def asignacion(self):
         self.regla("ASIGNACION")
