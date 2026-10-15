@@ -7,6 +7,7 @@ sys.path.insert(0, RAIZ)
 
 from compilador import Compilador  # noqa: E402
 from lexico import Lexico  # noqa: E402
+from maquina import ErrorEjecucion  # noqa: E402
 
 
 def compila(fuente):
@@ -42,6 +43,10 @@ class PruebasLexico(unittest.TestCase):
         self.assertEqual([t.valor for t in tokens if t.tipo != "FIN"], ["x", "=", "1", "+", "2", "\n", "y", "=", "3"])
         self.assertEqual(tokens[-2].linea, 3)
 
+    def test_corchetes_y_constructor_viejo(self):
+        normas = [t.norma for t in Lexico("a = (/ 1, 2 /) + [3]").tokens]
+        self.assertEqual(normas[:-1], ["a", "=", "[", "1", ",", "2", "]", "+", "[", "3", "]"])
+
     def test_errores_lexicos(self):
         errores = Lexico("a = 2q + 1 # 'abc\nb = .si.").errores
         self.assertEqual(len(errores), 4)
@@ -74,6 +79,12 @@ class PruebasSintactico(unittest.TestCase):
 
     def test_print_sin_formato(self):
         self.assertIn("ERROR SINTACTICO 10", self.error(programa("  PRINT x")))
+
+    def test_constructor_sin_cerrar(self):
+        self.assertIn("ERROR SINTACTICO 22", self.error(programa("  a = [1, 2", "INTEGER :: a(2)")))
+
+    def test_atributo_desconocido(self):
+        self.assertIn("ERROR SINTACTICO 21", self.error(programa("", "INTEGER, SAVE :: a")))
 
 
 class PruebasSemantico(unittest.TestCase):
@@ -110,6 +121,27 @@ class PruebasSemantico(unittest.TestCase):
 
     def test_tipos_incompatibles(self):
         self.assertIn("ERROR SEMANTICO 5", self.errores(programa("  x = 'a' + 1")))
+
+    def test_indice_fuera_de_rango(self):
+        self.assertIn("ERROR SEMANTICO 17", self.errores(programa("  a(4) = 1", "INTEGER :: a(3)")))
+
+    def test_indice_no_entero(self):
+        self.assertIn("ERROR SEMANTICO 16", self.errores(programa("  a(1.5) = 1", "INTEGER :: a(3)")))
+
+    def test_dimension_no_constante(self):
+        self.assertIn("ERROR SEMANTICO 18", self.errores(programa("", "INTEGER :: n\n  INTEGER :: a(n)")))
+
+    def test_arreglo_completo_en_operacion(self):
+        self.assertIn("ERROR SEMANTICO 19", self.errores(programa("  x = a + 1", "INTEGER :: x, a(3)")))
+
+    def test_indice_en_variable_simple(self):
+        self.assertIn("ERROR SEMANTICO 20", self.errores(programa("  x(1) = 1")))
+
+    def test_tamano_distinto(self):
+        self.assertIn("ERROR SEMANTICO 21", self.errores(programa("  a = [1, 2]", "INTEGER :: a(3)")))
+
+    def test_constructor_con_tipos_mezclados(self):
+        self.assertIn("ERROR SEMANTICO 22", self.errores(programa("  r = [1.0, 2]", "REAL :: r(2)")))
 
     def test_tipo_implicito_sin_implicit_none(self):
         r = compila("PROGRAM p\n  k = 2\n  r = 1.5\n  PRINT *, k, r\nEND PROGRAM p")
@@ -148,6 +180,23 @@ class PruebasEjecucion(unittest.TestCase):
     def test_cadenas_y_logicos(self):
         salida = ejecuta(programa("  PRINT *, 'ab' // 'cd', 3 > 2 .AND. .NOT. .FALSE."))
         self.assertEqual(salida, ["abcd T"])
+
+    def test_arreglos(self):
+        declaraciones = "INTEGER, PARAMETER :: n = 3\n  INTEGER :: i, v(0:n - 1)\n  REAL, DIMENSION(n) :: r = 0"
+        cuerpo = ("  READ *, v\n  DO i = 0, n - 1\n    r(i + 1) = v(i) * 2\n  END DO\n"
+                  "  PRINT *, v, SIZE(v)\n  PRINT *, r(3), SUM(v), MAXVAL(r)\n  v = [7, 8, 9]\n  PRINT *, v(2)")
+        salida = ejecuta(programa(cuerpo, declaraciones), ["4", "5", "6"])
+        self.assertEqual(salida, ["4 5 6 3", "12.000000 15 12.000000", "9"])
+
+    def test_burbuja(self):
+        with open(os.path.join(RAIZ, "ejemplos", "burbuja.f90"), encoding="utf-8") as f:
+            salida = ejecuta(f.read())
+        self.assertEqual(salida[3], "5 11 12 22 25 34 64 90")
+
+    def test_indice_fuera_de_rango_al_ejecutar(self):
+        r = compila(programa("  i = 4\n  a(i) = 1", "INTEGER :: i, a(3)"))
+        with self.assertRaises(ErrorEjecucion):
+            Compilador().ejecutar(r, salida=lambda _: None)
 
     def test_ejemplos_compilan(self):
         carpeta = os.path.join(RAIZ, "ejemplos")
