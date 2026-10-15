@@ -1,12 +1,19 @@
 import os
 import re
+import sys
 import shutil
 import tempfile
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from arbol import arbol_texto  # noqa: E402
+from compilador import Compilador  # noqa: E402
+from maquina import ErrorEjecucion  # noqa: E402
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -14,6 +21,30 @@ ctk.set_default_color_theme("dark-blue")
 TEAL_BG = "#0d3b3e"
 TEAL_BG_LIGHT = "#0f4448"
 FONT_EDITOR = ("Consolas", 13)
+
+PROGRAMA_INICIAL = """PROGRAM nuevo
+  IMPLICIT NONE
+
+END PROGRAM nuevo
+"""
+
+PLANTILLAS = {
+    "Programa": PROGRAMA_INICIAL,
+    "IF ... THEN ... ELSE": "IF (x > 0) THEN\n\nELSE\n\nEND IF\n",
+    "DO con contador": "DO i = 1, 10\n\nEND DO\n",
+    "DO WHILE": "DO WHILE (x > 0)\n\nEND DO\n",
+    "READ": "READ *, x\n",
+    "PRINT": "PRINT *, 'texto', x\n",
+}
+
+DECLARACIONES = {
+    "INTEGER": "INTEGER :: n\n",
+    "REAL": "REAL :: x\n",
+    "DOUBLE PRECISION": "DOUBLE PRECISION :: d\n",
+    "CHARACTER": "CHARACTER(len=20) :: nombre\n",
+    "LOGICAL": "LOGICAL :: listo\n",
+    "PARAMETER": "REAL, PARAMETER :: pi = 3.1416\n",
+}
 
 OPERADORES = "+-*/="
 
@@ -164,12 +195,16 @@ class CompiladorApp(ctk.CTk):
         self.ventana_buscar = None
         self._coincidencia_actual = None
         self._id_resaltado = None
+        self.compilador = Compilador()
 
         self._crear_menu()
         self._crear_widgets()
         self._crear_atajos()
 
-        self.historial.reiniciar("")
+        self.editor.insert("1.0", PROGRAMA_INICIAL)
+        self.editor.edit_modified(False)
+        self.historial.reiniciar(PROGRAMA_INICIAL)
+        self.resaltar_reservadas()
         self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
         self._actualizar_titulo()
 
@@ -204,45 +239,41 @@ class CompiladorApp(ctk.CTk):
         menubar.add_cascade(label="Editar", menu=menu_editar)
 
         menu_ejecutar = tk.Menu(menubar, tearoff=0)
+        menu_ejecutar.add_command(label="Compilar", accelerator="F9", command=self.compilar_todo)
         menu_ejecutar.add_command(label="Ejecutar", accelerator="F5", command=self.ejecutar)
         menubar.add_cascade(label="Ejecutar", menu=menu_ejecutar)
 
         menu_compiladores = tk.Menu(menubar, tearoff=0)
-        menu_compiladores.add_command(label="Analisis Lexico", accelerator="Alt+L",
-                                       command=lambda: self.fase_compilador("Analisis Lexico"))
+        menu_compiladores.add_command(label="Analisis Lexico", accelerator="Alt+L", command=self.fase_lexica)
         menu_compiladores.add_command(label="Analisis Sintactico", accelerator="Alt+S",
-                                       command=lambda: self.fase_compilador("Analisis Sintactico"))
-        menu_compiladores.add_command(label="Analisis Semantico", accelerator="Ctrl+S",
-                                       command=lambda: self.fase_compilador("Analisis Semantico"))
-        menu_compiladores.add_command(label="Generacion Codigo Intermedio", state="disabled")
-        menu_compiladores.add_command(label="Codigo Objeto", state="disabled")
+                                       command=self.fase_sintactica)
+        menu_compiladores.add_command(label="Analisis Semantico", accelerator="Alt+M",
+                                       command=self.fase_semantica)
+        menu_compiladores.add_command(label="Generacion Codigo Intermedio", accelerator="Alt+G",
+                                       command=self.fase_codigo)
+        menu_compiladores.add_command(label="Codigo Objeto", accelerator="Alt+O", command=self.codigo_objeto)
         menu_compiladores.add_separator()
         menu_compiladores.add_command(label="Checklist palabras reservadas", accelerator="Ctrl+R",
                                        command=self.checklist_reservadas)
         menubar.add_cascade(label="Compiladores", menu=menu_compiladores)
 
         menu_ayuda = tk.Menu(menubar, tearoff=0)
-        menu_librerias = tk.Menu(menu_ayuda, tearoff=0)
-        for lib in ("stdio.h", "conio.h", "math.h", "string.h", "stdlib.h", "ctype.h"):
-            menu_librerias.add_command(label=lib, command=lambda l=lib: self.agregar_libreria(l))
-        menu_ayuda.add_cascade(label="Librerias", menu=menu_librerias)
-
-        menu_ayuda_variables = tk.Menu(menu_ayuda, tearoff=0)
-        menu_ayuda_tipos = tk.Menu(menu_ayuda_variables, tearoff=0)
-        for tipo in ("int", "float", "String"):
-            menu_ayuda_tipos.add_command(label=tipo, command=lambda t=tipo: self.agregar_variable(t))
-        menu_ayuda_variables.add_cascade(label="Tipos", menu=menu_ayuda_tipos)
-        menu_ayuda.add_cascade(label="Variables", menu=menu_ayuda_variables)
-
-        menu_ayuda.add_command(label="void main", command=self.agregar_void_main)
+        menu_plantillas = tk.Menu(menu_ayuda, tearoff=0)
+        for nombre in PLANTILLAS:
+            menu_plantillas.add_command(label=nombre, command=lambda n=nombre: self.insertar_plantilla(n))
+        menu_ayuda.add_cascade(label="Plantillas", menu=menu_plantillas)
+        menu_ejemplos = tk.Menu(menu_ayuda, tearoff=0)
+        for nombre in self.ejemplos():
+            menu_ejemplos.add_command(label=nombre, command=lambda n=nombre: self.abrir_ejemplo(n))
+        menu_ayuda.add_cascade(label="Ejemplos", menu=menu_ejemplos)
         menu_ayuda.add_separator()
         menu_ayuda.add_command(label="Acerca de", command=self.acerca_de)
         menubar.add_cascade(label="Ayuda", menu=menu_ayuda)
 
         menu_variables = tk.Menu(menubar, tearoff=0)
         menu_tipos = tk.Menu(menu_variables, tearoff=0)
-        for tipo in ("int", "float", "String"):
-            menu_tipos.add_command(label=tipo, command=lambda t=tipo: self.agregar_variable(t))
+        for tipo in DECLARACIONES:
+            menu_tipos.add_command(label=tipo, command=lambda t=tipo: self.insertar_declaracion(t))
         menu_variables.add_cascade(label="Tipos", menu=menu_tipos)
         menubar.add_cascade(label="Variables", menu=menu_variables)
 
@@ -274,6 +305,7 @@ class CompiladorApp(ctk.CTk):
         self.fuente_reservada.configure(weight="bold")
         for palabra in CONJUNTO_RESERVADAS:
             self.editor._textbox.tag_config(palabra, foreground=COLOR_RESERVADA, font=self.fuente_reservada)
+        self.editor._textbox.tag_config("linea_error", background="#7a2230")
         self.editor._textbox.tag_raise("coincidencia")
         self.editor._textbox.tag_raise("coincidencia_actual")
 
@@ -312,10 +344,12 @@ class CompiladorApp(ctk.CTk):
         self.bind_all("<Control-e>", lambda e: self.seleccionar_todo())
         self.bind_all("<Control-E>", lambda e: self.seleccionar_todo())
         self.bind_all("<F5>", lambda e: self.ejecutar())
-        self.bind_all("<Alt-l>", lambda e: self.fase_compilador("Analisis Lexico"))
-        self.bind_all("<Alt-s>", lambda e: self.fase_compilador("Analisis Sintactico"))
-        self.bind_all("<Control-s>", lambda e: self.fase_compilador("Analisis Semantico"))
-        self.bind_all("<Control-S>", lambda e: self.fase_compilador("Analisis Semantico"))
+        self.bind_all("<F9>", lambda e: self.compilar_todo())
+        self.bind_all("<Alt-l>", lambda e: self.fase_lexica())
+        self.bind_all("<Alt-s>", lambda e: self.fase_sintactica())
+        self.bind_all("<Alt-m>", lambda e: self.fase_semantica())
+        self.bind_all("<Alt-g>", lambda e: self.fase_codigo())
+        self.bind_all("<Alt-o>", lambda e: self.codigo_objeto())
 
         # "break" evita que el editor aplique sus atajos por defecto
         for tecla in ("<Control-z>", "<Control-Z>"):
@@ -430,6 +464,7 @@ class CompiladorApp(ctk.CTk):
             self.texto_modificado = True
             self._actualizar_titulo()
             self.editor.edit_modified(False)
+            self.editor.tag_remove("linea_error", "1.0", "end")
             self._programar_resaltado()
             if not self._restaurando:
                 self._programar_estado()
@@ -655,54 +690,174 @@ class CompiladorApp(ctk.CTk):
         self.editor.tag_add("sel", "1.0", "end")
         return "break"
 
-    LIBRERIA_POR_TIPO = {
-        "int": "stdio.h",
-        "float": "math.h",
-        "String": "string.h",
-    }
+    def insertar_plantilla(self, nombre):
+        self.editor.insert("insert", PLANTILLAS[nombre])
+        self._log(f"Plantilla insertada: {nombre}")
 
-    def agregar_libreria(self, libreria):
-        directiva = f"#include <{libreria}>\n"
-        contenido = self.editor.get("1.0", "end-1c")
-        if directiva.strip() in contenido:
-            self.status_var.set(f"La librería {libreria} ya está incluida")
+    def insertar_declaracion(self, tipo):
+        self.editor.insert("insert", "  " + DECLARACIONES[tipo])
+        self._log(f"Declaracion {tipo} insertada")
+
+    def ejemplos(self):
+        carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ejemplos")
+        if not os.path.isdir(carpeta):
+            return []
+        return sorted(f for f in os.listdir(carpeta) if f.endswith(".f90"))
+
+    def abrir_ejemplo(self, nombre):
+        if not self._confirmar_descartar_cambios():
             return
-        self.editor.insert("1.0", directiva)
-        self._log(f"Librería agregada: {libreria}")
-
-    def agregar_variable(self, tipo):
-        libreria = self.LIBRERIA_POR_TIPO.get(tipo)
-        if libreria:
-            self.agregar_libreria(libreria)
-
-        plantillas = {
-            "int": "int variable;\n",
-            "float": "float variable;\n",
-            "String": "char variable[100];\n",
-        }
-        self.editor.insert("end", plantillas.get(tipo, f"{tipo} variable;\n"))
-        self._log(f"Variable de tipo {tipo} agregada")
-
-    def agregar_void_main(self):
-        contenido = self.editor.get("1.0", "end-1c")
-        if "void main" in contenido or "int main" in contenido:
-            self.status_var.set("Ya existe una función principal")
-            return
-        self.editor.insert("end", "\nvoid main() {\n\n}\n")
-        self._log("Estructura void main agregada")
+        ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ejemplos", nombre)
+        with open(ruta, "r", encoding="utf-8") as f:
+            contenido = f.read()
+        self._restaurando = True
+        self.editor.delete("1.0", "end")
+        self.editor.insert("1.0", contenido)
+        self.editor.edit_modified(False)
+        self._restaurando = False
+        self.historial.reiniciar(contenido)
+        self.resaltar_reservadas()
+        self.archivo_actual = ruta
+        self.texto_modificado = False
+        self._actualizar_titulo()
+        self._log(f"Ejemplo abierto: {nombre}")
 
     def acerca_de(self):
         messagebox.showinfo(
             "Acerca de",
-            "Diseño de Compilador\nPalabras reservadas de Fortran\n"
+            "Compilador Fortran\nSubconjunto de Fortran 90\n"
+            "Lexico, sintactico, semantico, codigo intermedio y ejecucion.\n"
             "Interfaz construida con CustomTkinter.",
         )
 
-    def ejecutar(self):
-        self._log("Ejecutando código... (funcionalidad pendiente de implementar)")
+    # fases del compilador
 
-    def fase_compilador(self, nombre):
-        self._log(f"{nombre}: funcionalidad pendiente de implementar")
+    def compilar(self):
+        resultado = self.compilador.compilar(self.editor.get("1.0", "end-1c"))
+        self.editor.tag_remove("linea_error", "1.0", "end")
+        for error in resultado.errores:
+            partes = error.split()
+            if len(partes) > 1 and partes[0] == "LINEA" and partes[1].isdigit():
+                linea = int(partes[1])
+                self.editor.tag_add("linea_error", f"{linea}.0", f"{linea}.end+1c")
+        return resultado
+
+    def limpia_consola(self, titulo):
+        self.consola.configure(state="normal")
+        self.consola.delete("1.0", "end")
+        self.consola.configure(state="disabled")
+        self._log(f"== {titulo} ==")
+
+    def muestra_errores(self, resultado, desde):
+        orden = ["lexico", "sintactico", "semantico"]
+        if resultado.advertencias and orden.index(desde) >= 2:
+            self._log("")
+            for a in resultado.advertencias:
+                self._log(a)
+        if resultado.exito or orden.index(resultado.etapa) > orden.index(desde):
+            return False
+        self._log("")
+        for e in resultado.errores:
+            self._log(e)
+        self.status_var.set(f"{len(resultado.errores)} error(es) en el analisis {resultado.etapa}")
+        return True
+
+    def fase_lexica(self):
+        r = self.compilar()
+        self.limpia_consola("ANALISIS LEXICO")
+        self._log(f"{'linea':>5}  {'lexema':<22}token")
+        for fila in r.lexico.tabla():
+            self._log(fila)
+        if not self.muestra_errores(r, "lexico"):
+            self.status_var.set(f"Analisis lexico correcto: {len(r.lexico.tabla())} tokens")
+
+    def fase_sintactica(self):
+        r = self.compilar()
+        self.limpia_consola("ANALISIS SINTACTICO")
+        if r.etapa == "lexico":
+            self.muestra_errores(r, "lexico")
+            return
+        for linea in r.traza:
+            self._log(linea)
+        if self.muestra_errores(r, "sintactico"):
+            return
+        self._log("")
+        self._log("== ARBOL SINTACTICO ==")
+        for linea in arbol_texto(r.programa):
+            self._log(linea)
+        self.status_var.set("Analisis sintactico correcto")
+
+    def fase_semantica(self):
+        r = self.compilar()
+        self.limpia_consola("ANALISIS SEMANTICO")
+        if r.etapa in ("lexico", "sintactico"):
+            self.muestra_errores(r, r.etapa)
+            return
+        self._log("Tabla de simbolos:")
+        for fila in r.semantico.tabla.tabla():
+            self._log("  " + fila)
+        if not self.muestra_errores(r, "semantico"):
+            self.status_var.set("Analisis semantico correcto")
+
+    def fase_codigo(self):
+        r = self.compilar()
+        self.limpia_consola("GENERACION DE CODIGO INTERMEDIO")
+        if not r.exito:
+            self.muestra_errores(r, r.etapa)
+            return
+        for linea in r.codigo().splitlines():
+            self._log(linea)
+        self.status_var.set(f"Codigo generado: {len(r.generador.codigo)} instrucciones")
+
+    def codigo_objeto(self):
+        r = self.compilar()
+        self.limpia_consola("CODIGO OBJETO")
+        if not r.exito:
+            self.muestra_errores(r, r.etapa)
+            return
+        if self.archivo_actual:
+            ruta = os.path.splitext(self.archivo_actual)[0] + ".obj"
+        else:
+            ruta = filedialog.asksaveasfilename(title="Guardar codigo objeto", defaultextension=".obj",
+                                                filetypes=[("Codigo objeto", "*.obj")])
+            if not ruta:
+                return
+        r.generador.guardar(ruta)
+        self._log(f"Codigo objeto guardado en {ruta}")
+        self._log(f"{len(r.generador.datos)} variables, {len(r.generador.codigo)} instrucciones")
+
+    def compilar_todo(self):
+        r = self.compilar()
+        self.limpia_consola("COMPILACION")
+        if r.exito:
+            for a in r.advertencias:
+                self._log(a)
+            self._log("COMPILACION EXITOSA")
+        else:
+            self._log(f"COMPILACION FALLIDA en el analisis {r.etapa}")
+            for e in r.errores:
+                self._log(e)
+        return r
+
+    def ejecutar(self):
+        r = self.compilar_todo()
+        if not r.exito:
+            return
+        self._log("")
+        self._log("== EJECUCION ==")
+
+        def entrada(texto):
+            valor = simpledialog.askstring("READ", f"Valor para {texto.split('=')[0].strip()}:", parent=self)
+            if valor is None:
+                raise ErrorEjecucion("EJECUCION CANCELADA")
+            self._log(f"> {valor}")
+            return valor
+
+        try:
+            self.compilador.ejecutar(r, entrada=entrada, salida=self._log)
+            self._log("== FIN DE LA EJECUCION ==")
+        except ErrorEjecucion as e:
+            self._log(str(e))
 
     def _log(self, mensaje):
         self.consola.configure(state="normal")
