@@ -26,6 +26,8 @@ class TablaSimbolos:
         clave = nombre.lower()
         if clave in self.simbolos:
             anterior = self.simbolos[clave]
+            if anterior.clase == "programa":
+                return anterior, f"'{nombre}' es el nombre del programa"
             if anterior.tipo != tipo:
                 return anterior, f"ambiguedad: '{nombre}' ya fue declarada como {anterior.tipo} en la linea {anterior.linea}"
             return anterior, f"'{nombre}' ya fue declarada en la linea {anterior.linea}"

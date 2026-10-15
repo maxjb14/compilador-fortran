@@ -156,6 +156,8 @@ class Semantico:
 
     def ciclo_do(self, s):
         simbolo = self.simbolo(s.variable, s.linea)
+        if s.variable.lower() in self.variables_do:
+            self.error(s.linea, 8, f"{s.variable} ya controla un do exterior")
         if simbolo is not None:
             if simbolo.tipo != "integer":
                 self.error(s.linea, 7, f"{s.variable} es {simbolo.tipo}")

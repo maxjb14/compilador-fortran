@@ -94,6 +94,16 @@ class PruebasSemantico(unittest.TestCase):
     def test_variable_del_do_modificada(self):
         self.assertIn("ERROR SEMANTICO 8", self.errores(programa("  DO i = 1, 3\n    i = 2\n  END DO")))
 
+    def test_do_anidado_con_la_misma_variable(self):
+        cuerpo = "  DO i = 1, 2
+    DO i = 1, 3
+    END DO
+  END DO"
+        self.assertIn("ERROR SEMANTICO 8", self.errores(programa(cuerpo)))
+
+    def test_variable_con_nombre_del_programa(self):
+        self.assertIn("nombre del programa", self.errores(programa("", "INTEGER :: prueba")))
+
     def test_exit_fuera_de_ciclo(self):
         self.assertIn("ERROR SEMANTICO 9", self.errores(programa("  EXIT")))
 
