@@ -1,5 +1,5 @@
-from arbol import (Asignacion, Binaria, Ciclar, Escribir, Funcion, Hacer, Leer, Literal,
-                   Mientras, Parar, Salir, Si, Unaria, Variable)
+from arbol import (Asignacion, Binaria, Ciclar, Constructor, Elemento, Escribir, Funcion, Hacer,
+                   Leer, Literal, Mientras, Parar, Salir, Si, Unaria, Variable)
 
 OPERADORES = {
     "+": "ADD", "*": "MUL", "**": "POW", "//": "CONCAT",
@@ -100,7 +100,11 @@ class GeneraCodigo:
         for s in tabla.variables():
             tipo = s.tipo.upper().replace(" ", "_")
             extra = f" {s.longitud}" if s.tipo == "character" else ""
-            self.datos.append(f"VAR {s.nombre.lower()} {tipo}{extra}")
+            if s.dimension is not None:
+                inferior, superior = s.dimension
+                self.datos.append(f"ARRAY {s.nombre.lower()} {tipo} {inferior} {superior}{extra}")
+            else:
+                self.datos.append(f"VAR {s.nombre.lower()} {tipo}{extra}")
         self.tabla = tabla
         self.code()
         for d in programa.declaraciones:
@@ -114,11 +118,20 @@ class GeneraCodigo:
     def tipo_de(self, nombre):
         return self.tabla.buscar(nombre).tipo
 
-    def asigna(self, nombre, expresion):
-        self.pusha(nombre.lower())
+    def asigna(self, nombre, expresion, indice=None):
+        self.direccion(nombre, indice)
         self.expresion(expresion)
-        self.convierte(expresion.tipo, self.tipo_de(nombre))
+        # en un arreglo completo la conversion la hace store elemento por elemento
+        if getattr(expresion, "tamano", None) is None:
+            self.convierte(expresion.tipo, self.tipo_de(nombre))
         self.store()
+
+    def direccion(self, nombre, indice=None):
+        # direccion de una variable o de un elemento de arreglo
+        self.pusha(nombre.lower())
+        if indice is not None:
+            self.expresion(indice)
+            self.emite("INDEX")
 
     def convierte(self, origen, destino):
         if destino == "integer" and origen in ("real", "double precision"):
@@ -132,10 +145,14 @@ class GeneraCodigo:
 
     def sentencia(self, s):
         if isinstance(s, Asignacion):
-            self.asigna(s.variable, s.expresion)
+            self.asigna(s.variable, s.expresion, s.indice)
         elif isinstance(s, Leer):
-            for nombre in s.variables:
-                self.input(nombre.lower())
+            for nombre, indice in zip(s.variables, s.indices):
+                if indice is None:
+                    self.input(nombre.lower())
+                else:
+                    self.direccion(nombre, indice)
+                    self.emite("INPUT")
         elif isinstance(s, Escribir):
             for e in s.elementos:
                 self.expresion(e)
@@ -248,6 +265,13 @@ class GeneraCodigo:
         elif isinstance(nodo, Variable):
             self.pusha(nodo.nombre.lower())
             self.load()
+        elif isinstance(nodo, Elemento):
+            self.direccion(nodo.nombre, nodo.indice)
+            self.load()
+        elif isinstance(nodo, Constructor):
+            for e in nodo.elementos:
+                self.expresion(e)
+            self.emite(f"PACK {len(nodo.elementos)}")
         elif isinstance(nodo, Unaria):
             self.expresion(nodo.expresion)
             self.emite("NOT" if nodo.operador == ".NOT." else "NEG")

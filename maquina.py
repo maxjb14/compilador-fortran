@@ -6,8 +6,12 @@ class ErrorEjecucion(Exception):
 
 
 class Direccion:
-    def __init__(self, nombre):
+    def __init__(self, nombre, indice=None):
         self.nombre = nombre
+        self.indice = indice
+
+    def texto(self):
+        return self.nombre if self.indice is None else f"{self.nombre}({self.indice})"
 
 
 def division_entera(a, b):
@@ -39,6 +43,10 @@ FUNCIONES = {
     "int": lambda x: int(x),
     "nint": redondeo,
     "real": lambda x: float(x),
+    "size": len,
+    "sum": sum,
+    "maxval": max,
+    "minval": min,
 }
 
 
@@ -57,6 +65,7 @@ class MaquinaPila:
         self.limite = limite
         self.tipos = {}
         self.longitudes = {}
+        self.dimensiones = {}
         self.instrucciones = []
         self.etiquetas = {}
         self.cargar(texto)
@@ -71,8 +80,12 @@ class MaquinaPila:
                 seccion = linea
                 continue
             if seccion == ".DATA":
+                # VAR nombre TIPO [longitud] o ARRAY nombre TIPO inferior superior [longitud]
                 partes = linea.split()
                 self.tipos[partes[1]] = partes[2].lower().replace("_", " ")
+                if partes[0] == "ARRAY":
+                    self.dimensiones[partes[1]] = (int(partes[3]), int(partes[4]))
+                    partes = partes[:3] + partes[5:]
                 if len(partes) > 3:
                     self.longitudes[partes[1]] = int(partes[3])
             else:
@@ -101,8 +114,9 @@ class MaquinaPila:
             return str(valor)[:self.longitudes.get(nombre, 1)]
         return valor
 
-    def lee(self, nombre):
-        texto = self.entrada(f"{nombre} = ").strip()
+    def lee(self, nombre, etiqueta=None):
+        etiqueta = etiqueta or nombre
+        texto = self.entrada(f"{etiqueta} = ").strip()
         tipo = self.tipos[nombre]
         try:
             if tipo == "integer":
@@ -117,10 +131,53 @@ class MaquinaPila:
                 raise ValueError
             return self.ajusta(nombre, texto.strip("'\""))
         except ValueError:
-            raise ErrorEjecucion(f"ERROR DE EJECUCION: '{texto}' no es un valor {tipo} valido para {nombre}")
+            raise ErrorEjecucion(f"ERROR DE EJECUCION: '{texto}' no es un valor {tipo} valido para {etiqueta}")
+
+    def posicion(self, d):
+        inferior, superior = self.dimensiones[d.nombre]
+        if not inferior <= d.indice <= superior:
+            raise ErrorEjecucion(f"ERROR DE EJECUCION: indice fuera de rango en {d.texto()}, "
+                                 f"el rango es {inferior}:{superior}")
+        return d.indice - inferior
+
+    def carga(self, memoria, d):
+        if d.indice is not None:
+            valor = memoria[d.nombre][self.posicion(d)]
+        elif d.nombre in self.dimensiones:
+            valor = memoria[d.nombre]
+            valor = None if None in valor else list(valor)
+        else:
+            valor = memoria.get(d.nombre)
+        if valor is None:
+            raise ErrorEjecucion(f"ERROR DE EJECUCION: la variable '{d.texto()}' no tiene valor")
+        return valor
+
+    def guarda(self, memoria, d, valor):
+        if d.indice is not None:
+            memoria[d.nombre][self.posicion(d)] = self.ajusta(d.nombre, valor)
+        elif d.nombre in self.dimensiones:
+            elementos = len(memoria[d.nombre])
+            if not isinstance(valor, list):
+                valor = [valor] * elementos
+            elif len(valor) != elementos:
+                raise ErrorEjecucion(f"ERROR DE EJECUCION: {d.nombre} tiene {elementos} elementos "
+                                     f"y el valor tiene {len(valor)}")
+            memoria[d.nombre] = [self.ajusta(d.nombre, v) for v in valor]
+        else:
+            memoria[d.nombre] = self.ajusta(d.nombre, valor)
+
+    def lee_en(self, memoria, d):
+        if d.indice is None and d.nombre in self.dimensiones:
+            inferior, _ = self.dimensiones[d.nombre]
+            for i in range(len(memoria[d.nombre])):
+                memoria[d.nombre][i] = self.lee(d.nombre, f"{d.nombre}({inferior + i})")
+            return
+        valor = self.lee(d.nombre, d.texto())
+        self.guarda(memoria, d, valor)
 
     def ejecutar(self):
-        memoria = {}
+        # los arreglos empiezan con todos sus elementos sin valor
+        memoria = {nombre: [None] * max(0, sup - inf + 1) for nombre, (inf, sup) in self.dimensiones.items()}
         pila = []
         renglon = []
         pc = 0
@@ -141,19 +198,26 @@ class MaquinaPila:
                 pila.append(self.constante(arg))
             elif op == "PUSHA":
                 pila.append(Direccion(arg))
-            elif op == "LOAD":
+            elif op == "INDEX":
+                indice = saca()
                 d = saca()
-                if d.nombre not in memoria:
-                    raise ErrorEjecucion(f"ERROR DE EJECUCION: la variable '{d.nombre}' no tiene valor")
-                pila.append(memoria[d.nombre])
+                pila.append(Direccion(d.nombre, indice))
+            elif op == "LOAD":
+                pila.append(self.carga(memoria, saca()))
             elif op == "STORE":
                 valor = saca()
-                d = saca()
-                memoria[d.nombre] = self.ajusta(d.nombre, valor)
+                self.guarda(memoria, saca(), valor)
             elif op == "INPUT":
-                memoria[arg] = self.lee(arg)
+                self.lee_en(memoria, Direccion(arg) if arg else saca())
+            elif op == "PACK":
+                elementos = [saca() for _ in range(int(arg))]
+                pila.append(elementos[::-1])
             elif op == "OUTPUT":
-                renglon.append(formato(saca()))
+                valor = saca()
+                if isinstance(valor, list):
+                    renglon.extend(formato(v) for v in valor)
+                else:
+                    renglon.append(formato(valor))
             elif op == "NEWLINE":
                 self.salida(" ".join(renglon))
                 renglon = []
