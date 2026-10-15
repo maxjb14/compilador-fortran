@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from arbol import arbol_texto  # noqa: E402
 from compilador import Compilador  # noqa: E402
+from componentes import BarraMenu, mostrar_info, pedir_texto, preguntar_si_no_cancelar  # noqa: E402
 from maquina import ErrorEjecucion  # noqa: E402
 
 ctk.set_appearance_mode("dark")
@@ -209,75 +210,55 @@ class CompiladorApp(ctk.CTk):
         self._actualizar_titulo()
 
     def _crear_menu(self):
-        menubar = tk.Menu(self)
+        barra = BarraMenu(self)
+        barra.pack(side="top", fill="x")
+        self.barra_menu = barra
 
-        menu_archivo = tk.Menu(menubar, tearoff=0)
-        menu_archivo.add_command(label="Abrir", accelerator="Ctrl+A", command=self.abrir_archivo)
-        menu_archivo.add_command(label="Guardar", accelerator="Ctrl+G", command=self.guardar_archivo)
-        menu_archivo.add_command(label="Guardar como...", command=self.guardar_como)
-        menu_archivo.add_separator()
-        menu_archivo.add_command(label="Limpiar pantalla", accelerator="Ctrl+P", command=self.limpiar_pantalla)
-        menu_archivo.add_separator()
-        menu_archivo.add_command(label="Cerrar", accelerator="Ctrl+Q", command=self.cerrar_aplicacion)
-        menubar.add_cascade(label="Archivo", menu=menu_archivo)
-
-        menu_editar = tk.Menu(menubar, tearoff=0)
-        menu_editar.add_command(label="Deshacer", accelerator="Ctrl+Z", command=self.deshacer)
-        menu_editar.add_command(label="Hacer", accelerator="Ctrl+Y", command=self.rehacer)
-        menu_editar.add_command(label="Ver historial temporal", command=self.mostrar_historial)
-        menu_editar.add_separator()
-        menu_editar.add_command(label="Buscar y reemplazar", accelerator="Ctrl+F", command=self.abrir_buscar)
-        menu_editar.add_separator()
-        menu_editar.add_command(label="Cortar", accelerator="Ctrl+X",
-                                 command=lambda: self._editar_evento("<<Cut>>"))
-        menu_editar.add_command(label="Copiar", accelerator="Ctrl+C",
-                                 command=lambda: self._editar_evento("<<Copy>>"))
-        menu_editar.add_command(label="Pegar", accelerator="Ctrl+V",
-                                 command=lambda: self._editar_evento("<<Paste>>"))
-        menu_editar.add_separator()
-        menu_editar.add_command(label="Seleccionar todo", accelerator="Ctrl+E", command=self.seleccionar_todo)
-        menubar.add_cascade(label="Editar", menu=menu_editar)
-
-        menu_ejecutar = tk.Menu(menubar, tearoff=0)
-        menu_ejecutar.add_command(label="Compilar", accelerator="F9", command=self.compilar_todo)
-        menu_ejecutar.add_command(label="Ejecutar", accelerator="F5", command=self.ejecutar)
-        menubar.add_cascade(label="Ejecutar", menu=menu_ejecutar)
-
-        menu_compiladores = tk.Menu(menubar, tearoff=0)
-        menu_compiladores.add_command(label="Analisis Lexico", accelerator="Alt+L", command=self.fase_lexica)
-        menu_compiladores.add_command(label="Analisis Sintactico", accelerator="Alt+S",
-                                       command=self.fase_sintactica)
-        menu_compiladores.add_command(label="Analisis Semantico", accelerator="Alt+M",
-                                       command=self.fase_semantica)
-        menu_compiladores.add_command(label="Generacion Codigo Intermedio", accelerator="Alt+G",
-                                       command=self.fase_codigo)
-        menu_compiladores.add_command(label="Codigo Objeto", accelerator="Alt+O", command=self.codigo_objeto)
-        menu_compiladores.add_separator()
-        menu_compiladores.add_command(label="Checklist palabras reservadas", accelerator="Ctrl+R",
-                                       command=self.checklist_reservadas)
-        menubar.add_cascade(label="Compiladores", menu=menu_compiladores)
-
-        menu_ayuda = tk.Menu(menubar, tearoff=0)
-        menu_plantillas = tk.Menu(menu_ayuda, tearoff=0)
-        for nombre in PLANTILLAS:
-            menu_plantillas.add_command(label=nombre, command=lambda n=nombre: self.insertar_plantilla(n))
-        menu_ayuda.add_cascade(label="Plantillas", menu=menu_plantillas)
-        menu_ejemplos = tk.Menu(menu_ayuda, tearoff=0)
-        for nombre in self.ejemplos():
-            menu_ejemplos.add_command(label=nombre, command=lambda n=nombre: self.abrir_ejemplo(n))
-        menu_ayuda.add_cascade(label="Ejemplos", menu=menu_ejemplos)
-        menu_ayuda.add_separator()
-        menu_ayuda.add_command(label="Acerca de", command=self.acerca_de)
-        menubar.add_cascade(label="Ayuda", menu=menu_ayuda)
-
-        menu_variables = tk.Menu(menubar, tearoff=0)
-        menu_tipos = tk.Menu(menu_variables, tearoff=0)
-        for tipo in DECLARACIONES:
-            menu_tipos.add_command(label=tipo, command=lambda t=tipo: self.insertar_declaracion(t))
-        menu_variables.add_cascade(label="Tipos", menu=menu_tipos)
-        menubar.add_cascade(label="Variables", menu=menu_variables)
-
-        self.config(menu=menubar)
+        barra.agregar("Archivo", [
+            ("Abrir", "Ctrl+A", self.abrir_archivo),
+            ("Guardar", "Ctrl+G", self.guardar_archivo),
+            ("Guardar como...", None, self.guardar_como),
+            None,
+            ("Limpiar pantalla", "Ctrl+P", self.limpiar_pantalla),
+            None,
+            ("Cerrar", "Ctrl+Q", self.cerrar_aplicacion),
+        ])
+        barra.agregar("Editar", [
+            ("Deshacer", "Ctrl+Z", self.deshacer),
+            ("Hacer", "Ctrl+Y", self.rehacer),
+            ("Ver historial temporal", None, self.mostrar_historial),
+            None,
+            ("Buscar y reemplazar", "Ctrl+F", self.abrir_buscar),
+            None,
+            ("Cortar", "Ctrl+X", lambda: self._editar_evento("<<Cut>>")),
+            ("Copiar", "Ctrl+C", lambda: self._editar_evento("<<Copy>>")),
+            ("Pegar", "Ctrl+V", lambda: self._editar_evento("<<Paste>>")),
+            None,
+            ("Seleccionar todo", "Ctrl+E", self.seleccionar_todo),
+        ])
+        barra.agregar("Ejecutar", [
+            ("Compilar", "F9", self.compilar_todo),
+            ("Ejecutar", "F5", self.ejecutar),
+        ])
+        barra.agregar("Compiladores", [
+            ("Analisis Lexico", "Alt+L", self.fase_lexica),
+            ("Analisis Sintactico", "Alt+S", self.fase_sintactica),
+            ("Analisis Semantico", "Alt+M", self.fase_semantica),
+            ("Generacion Codigo Intermedio", "Alt+G", self.fase_codigo),
+            ("Codigo Objeto", "Alt+O", self.codigo_objeto),
+            None,
+            ("Checklist palabras reservadas", "Ctrl+R", self.checklist_reservadas),
+        ])
+        plantillas = [(n, None, lambda n=n: self.insertar_plantilla(n)) for n in PLANTILLAS]
+        ejemplos = [(n, None, lambda n=n: self.abrir_ejemplo(n)) for n in self.ejemplos()]
+        barra.agregar("Ayuda", [
+            ("Plantillas", None, plantillas),
+            ("Ejemplos", None, ejemplos),
+            None,
+            ("Acerca de", None, self.acerca_de),
+        ])
+        tipos = [(t, None, lambda t=t: self.insertar_declaracion(t)) for t in DECLARACIONES]
+        barra.agregar("Variables", [("Tipos", None, tipos)])
 
     def _crear_widgets(self):
         contenedor = ctk.CTkFrame(self, fg_color="transparent")
@@ -378,7 +359,7 @@ class CompiladorApp(ctk.CTk):
             with open(ruta, "r", encoding="utf-8") as f:
                 contenido = f.read()
         except Exception as e:
-            messagebox.showerror("Error al abrir", f"No se pudo abrir el archivo:\n{e}")
+            mostrar_info(self, "Error al abrir", f"No se pudo abrir el archivo:\n{e}")
             return
 
         self._restaurando = True
@@ -400,7 +381,7 @@ class CompiladorApp(ctk.CTk):
             with open(self.archivo_actual, "w", encoding="utf-8") as f:
                 f.write(self.editor.get("1.0", "end-1c"))
         except Exception as e:
-            messagebox.showerror("Error al guardar", f"No se pudo guardar el archivo:\n{e}")
+            mostrar_info(self, "Error al guardar", f"No se pudo guardar el archivo:\n{e}")
             return False
 
         self.texto_modificado = False
@@ -449,7 +430,8 @@ class CompiladorApp(ctk.CTk):
         if not self.texto_modificado:
             return True
 
-        respuesta = messagebox.askyesnocancel(
+        respuesta = preguntar_si_no_cancelar(
+            self,
             "Cambios sin guardar",
             f"Hay cambios sin guardar. ¿Desea guardarlos antes de {accion}?",
         )
@@ -723,7 +705,8 @@ class CompiladorApp(ctk.CTk):
         self._log(f"Ejemplo abierto: {nombre}")
 
     def acerca_de(self):
-        messagebox.showinfo(
+        mostrar_info(
+            self,
             "Acerca de",
             "Compilador Fortran\nSubconjunto de Fortran 90\n"
             "Lexico, sintactico, semantico, codigo intermedio y ejecucion.\n"
@@ -847,7 +830,7 @@ class CompiladorApp(ctk.CTk):
         self._log("== EJECUCION ==")
 
         def entrada(texto):
-            valor = simpledialog.askstring("READ", f"Valor para {texto.split('=')[0].strip()}:", parent=self)
+            valor = pedir_texto(self, "READ", f"Valor para {texto.split('=')[0].strip()}:")
             if valor is None:
                 raise ErrorEjecucion("EJECUCION CANCELADA")
             self._log(f"> {valor}")
