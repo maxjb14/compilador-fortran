@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.obj
+*_analisis.txt
+.vscode/
+.idea/
