@@ -57,6 +57,8 @@ PROGRAM nombre
   DOUBLE PRECISION :: d
   CHARACTER(len=20) :: nombre
   LOGICAL :: listo = .FALSE.
+  INTEGER :: datos(5) = [4, 1, 3, 5, 2]
+  REAL, DIMENSION(0:9) :: tabla
 
   READ *, n
   total = total + n * 2
@@ -79,13 +81,21 @@ PROGRAM nombre
   DO WHILE (n > 0)
     n = n - 1
   END DO
+
+  datos(1) = datos(2) + 1
+  READ *, tabla(3)
+  tabla = 0                       ! llena todo el arreglo
+  PRINT *, datos, SUM(datos)
 END PROGRAM nombre
 ```
 
 - Tipos: `INTEGER`, `REAL`, `DOUBLE PRECISION`, `CHARACTER(len=n)`, `LOGICAL` y `PARAMETER`.
 - Operadores: `+ - * / **`, `//` (concatenación), `== /= < <= > >=` y sus formas `.EQ. .NE. .LT. .LE. .GT. .GE.`,
   `.AND. .OR. .NOT. .EQV. .NEQV.`.
-- Funciones intrínsecas: `MOD ABS MAX MIN SQRT EXP LOG SIN COS INT NINT REAL`.
+- Arreglos de una dimensión: `a(n)`, `a(inferior:superior)` o `DIMENSION(n)`; elementos `a(i)`,
+  constructores `[1, 2, 3]` o `(/ 1, 2, 3 /)`; el arreglo completo se puede asignar, leer e imprimir.
+- Funciones intrínsecas: `MOD ABS MAX MIN SQRT EXP LOG SIN COS INT NINT REAL` y para arreglos
+  `SIZE SUM MAXVAL MINVAL`.
 - No distingue mayúsculas; comentarios con `!`, continuación de línea con `&` y `;` para separar instrucciones.
 - Sin `IMPLICIT NONE` las variables no declaradas toman el tipo implícito de Fortran (i a n `INTEGER`, las demás `REAL`).
 
@@ -123,7 +133,8 @@ Sintácticos:
 | 7 | esperaba constante, variable o expresión | 17 | esperaba NONE después de IMPLICIT |
 | 8 | esperaba PROGRAM | 18 | se encontró = en lugar de un operador relacional |
 | 9 | esperaba el nombre del programa | 20 | instrucción después de END PROGRAM |
-| 10 | esperaba `* ,` después de READ o PRINT | | |
+| 10 | esperaba `* ,` después de READ o PRINT | 21 | esperaba PARAMETER o DIMENSION |
+| | | 22 | esperaba ] |
 
 Semánticos:
 
@@ -136,7 +147,10 @@ Semánticos:
 | 5 | tipos incompatibles en la operación | 13 | función desconocida o argumentos incorrectos |
 | 6 | la condición debe ser LOGICAL | 14 | el valor inicial debe ser constante |
 | 7 | la variable del DO debe ser INTEGER | 15 | el paso del DO no puede ser cero |
-| 8 | se modifica la variable del DO dentro del ciclo | | |
+| 8 | se modifica la variable del DO dentro del ciclo | 16 | el índice del arreglo debe ser INTEGER |
+| 17 | índice fuera del rango del arreglo | 18 | la dimensión debe ser una constante INTEGER |
+| 19 | arreglo completo donde falta el índice | 20 | la variable no es un arreglo |
+| 21 | el tamaño de los arreglos no coincide | 22 | elementos del arreglo de distinto tipo |
 
 Además hay advertencias: variable usada antes de tener valor, variable que no se usa,
 valor real que se trunca a entero, cadena que se recorta y tipo implícito.
@@ -146,6 +160,7 @@ valor real que se trunca a entero, cadena que se recorta y tipo implícito.
 ```
 .DATA
 VAR n INTEGER
+ARRAY datos INTEGER 1 8     arreglo con limites 1 a 8
 .CODE
 PUSHA n          apila la direccion de n
 PUSHC 5          apila la constante 5
@@ -161,11 +176,13 @@ LOAD             cambia la direccion del tope por su valor
 | `AND OR NOT EQV NEQV CONCAT` | operaciones lógicas y de cadenas |
 | `CVTI CVTR` | conversión a entero y a real |
 | `CALL f n` | función intrínseca con n argumentos |
-| `INPUT x`, `OUTPUT`, `NEWLINE` | entrada y salida |
+| `INDEX` | cambia la dirección de un arreglo y el índice del tope por la dirección del elemento |
+| `PACK n` | junta los n valores del tope en un arreglo |
+| `INPUT x`, `INPUT`, `OUTPUT`, `NEWLINE` | entrada (`INPUT` sin nombre lee en la dirección del tope) y salida |
 | `LABEL L`, `JMP L`, `JMPF L` | etiquetas y saltos (JMPF salta si el tope es falso) |
 | `HALT`, `END` | fin del programa |
 
 ## Ejemplos
 
-En `ejemplos/`: `hola`, `factorial`, `promedio`, `fibonacci`, `primos`, `tablas` y tres archivos con
+En `ejemplos/`: `hola`, `factorial`, `promedio`, `fibonacci`, `primos`, `tablas`, `burbuja` y tres archivos con
 errores léxicos, sintácticos y semánticos.
