@@ -68,6 +68,7 @@ class Semantico:
     def declaracion(self, d):
         clase = "parametro" if d.parametro else "variable"
         for nombre, valor, linea in d.variables:
+            errores_antes = len(self.errores)
             if valor is not None:
                 tipo_valor = self.expresion(valor)
                 if not self.es_constante(valor):
@@ -81,7 +82,7 @@ class Semantico:
                 ambigua = problema.startswith("ambiguedad")
                 self.error(linea, 1 if ambigua else 2, problema.replace("ambiguedad: ", ""))
                 continue
-            if valor is not None:
+            if valor is not None and len(self.errores) == errores_antes:
                 simbolo.inicializada = True
                 simbolo.valor = self.valor_constante(valor)
 
