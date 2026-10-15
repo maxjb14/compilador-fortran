@@ -14,6 +14,8 @@ class Simbolo:
         # (inferior, superior) si es arreglo
         self.dimension = dimension
         self.valor = None
+        # valor numerico de un parameter, para dimensiones e indices
+        self.constante = None
         self.inicializada = False
         self.usada = False
 

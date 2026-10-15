@@ -1,5 +1,5 @@
-from arbol import (Asignacion, Binaria, Ciclar, Escribir, Funcion, Hacer, Leer, Literal,
-                   Mientras, Parar, Salir, Si, Unaria, Variable)
+from arbol import (Asignacion, Binaria, Ciclar, Constructor, Elemento, Escribir, Funcion, Hacer,
+                   Leer, Literal, Mientras, Parar, Salir, Si, Unaria, Variable)
 from simbolos import TablaSimbolos
 
 ERRORES_SEMANTICOS = {
@@ -18,6 +18,13 @@ ERRORES_SEMANTICOS = {
     13: "FUNCION DESCONOCIDA O CON ARGUMENTOS INCORRECTOS",
     14: "EL VALOR INICIAL DEBE SER CONSTANTE",
     15: "EL PASO DEL DO NO PUEDE SER CERO",
+    16: "EL INDICE DEL ARREGLO DEBE SER INTEGER",
+    17: "INDICE FUERA DEL RANGO DEL ARREGLO",
+    18: "LA DIMENSION DEBE SER UNA CONSTANTE INTEGER",
+    19: "EL ARREGLO COMPLETO NO SE PUEDE USAR AQUI, FALTA EL INDICE",
+    20: "LA VARIABLE NO ES UN ARREGLO",
+    21: "EL TAMANO DE LOS ARREGLOS NO COINCIDE",
+    22: "LOS ELEMENTOS DEL ARREGLO DEBEN SER DEL MISMO TIPO",
 }
 
 NUMERICOS = ("integer", "real", "double precision")
@@ -29,6 +36,9 @@ FUNCIONES = {
     "sqrt": (1, "real"), "exp": (1, "real"), "log": (1, "real"), "sin": (1, "real"),
     "cos": (1, "real"), "int": (1, "integer"), "nint": (1, "integer"), "real": (1, "real"),
 }
+
+# reciben un arreglo completo; tipo de resultado o None si es el del arreglo
+FUNCIONES_ARREGLO = {"size": "integer", "sum": None, "maxval": None, "minval": None}
 
 
 def mayor_numerico(a, b):
@@ -69,15 +79,20 @@ class Semantico:
         clase = "parametro" if d.parametro else "variable"
         for nombre, valor, linea in d.variables:
             errores_antes = len(self.errores)
+            dimension = None
+            if nombre in d.dimensiones:
+                dimension = self.dimension(d.dimensiones[nombre], linea, nombre)
             if valor is not None:
-                tipo_valor = self.expresion(valor)
+                tipo_valor = self.expresion(valor, arreglo=dimension is not None)
                 if not self.es_constante(valor):
                     self.error(linea, 14, nombre)
                 elif tipo_valor is not None:
                     self.revisa_asignacion(d.tipo, tipo_valor, linea, nombre, d.longitud, valor)
+                    if dimension is not None:
+                        self.revisa_tamano(dimension[1] - dimension[0] + 1, valor, linea, nombre)
             elif d.parametro:
                 self.error(linea, 11, nombre)
-            simbolo, problema = self.tabla.declarar(nombre, d.tipo, clase, linea, d.longitud)
+            simbolo, problema = self.tabla.declarar(nombre, d.tipo, clase, linea, d.longitud, dimension)
             if problema:
                 ambigua = problema.startswith("ambiguedad")
                 self.error(linea, 1 if ambigua else 2, problema.replace("ambiguedad: ", ""))
@@ -85,6 +100,50 @@ class Semantico:
             if valor is not None and len(self.errores) == errores_antes:
                 simbolo.inicializada = True
                 simbolo.valor = self.valor_constante(valor)
+                if dimension is None:
+                    simbolo.constante = self.evalua(valor)
+
+    def dimension(self, limites, linea, nombre):
+        valores = []
+        for limite in limites:
+            if limite is None:
+                valores.append(1)
+                continue
+            tipo = self.expresion(limite)
+            valor = self.evalua(limite) if self.es_constante(limite) else None
+            if tipo is not None and (tipo != "integer" or not isinstance(valor, int)):
+                self.error(linea, 18, nombre)
+            valores.append(valor if isinstance(valor, int) else 1)
+        return valores[0], max(valores[1], valores[0] - 1)
+
+    def evalua(self, nodo):
+        # valor de una expresion constante o None si no se sabe al compilar
+        if isinstance(nodo, Literal):
+            return nodo.valor
+        if isinstance(nodo, Variable):
+            s = self.tabla.buscar(nodo.nombre)
+            return s.constante if s is not None and s.clase == "parametro" else None
+        if isinstance(nodo, Unaria) and nodo.operador == "-":
+            valor = self.evalua(nodo.expresion)
+            return None if valor is None else -valor
+        if isinstance(nodo, Binaria) and nodo.operador in ("+", "-", "*", "/", "**"):
+            a, b = self.evalua(nodo.izquierda), self.evalua(nodo.derecha)
+            if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (a, b)):
+                return None
+            if nodo.operador == "+":
+                return a + b
+            if nodo.operador == "-":
+                return a - b
+            if nodo.operador == "*":
+                return a * b
+            if nodo.operador == "**":
+                return a ** b if b >= 0 else None
+            if b == 0:
+                return None
+            if isinstance(a, int) and isinstance(b, int):
+                return int(a / b)
+            return a / b
+        return None
 
     def es_constante(self, nodo):
         if isinstance(nodo, Literal):
@@ -92,7 +151,7 @@ class Semantico:
         if isinstance(nodo, Variable):
             s = self.tabla.buscar(nodo.nombre)
             return s is not None and s.clase == "parametro"
-        if isinstance(nodo, (Binaria, Unaria, Funcion)):
+        if isinstance(nodo, (Binaria, Unaria, Funcion, Constructor)):
             return all(self.es_constante(h) for h in nodo.hijos())
         return False
 
@@ -101,6 +160,8 @@ class Semantico:
             return nodo.texto
         if isinstance(nodo, Unaria) and isinstance(nodo.expresion, Literal) and nodo.operador == "-":
             return "-" + nodo.expresion.texto
+        if isinstance(nodo, Constructor):
+            return "[" + ", ".join(self.valor_constante(e) for e in nodo.elementos) + "]"
         return "(expresion)"
 
     # sentencias
@@ -112,9 +173,14 @@ class Semantico:
     def sentencia(self, s):
         if isinstance(s, Asignacion):
             simbolo = self.simbolo(s.variable, s.linea)
-            tipo = self.expresion(s.expresion)
+            completo = simbolo is not None and simbolo.dimension is not None and s.indice is None
+            tipo = self.expresion(s.expresion, arreglo=completo)
+            if s.indice is not None:
+                self.revisa_indice(simbolo, s.indice, s.linea, s.variable)
             if simbolo is None:
                 return
+            if completo and tipo is not None:
+                self.revisa_tamano(simbolo.elementos, s.expresion, s.linea, s.variable)
             if simbolo.clase == "parametro":
                 self.error(s.linea, 10, s.variable)
             elif s.variable.lower() in self.variables_do:
@@ -123,8 +189,10 @@ class Semantico:
                 self.revisa_asignacion(simbolo.tipo, tipo, s.linea, s.variable, simbolo.longitud, s.expresion)
             simbolo.inicializada = True
         elif isinstance(s, Leer):
-            for nombre in s.variables:
+            for nombre, indice in zip(s.variables, s.indices):
                 simbolo = self.simbolo(nombre, s.linea)
+                if indice is not None:
+                    self.revisa_indice(simbolo, indice, s.linea, nombre)
                 if simbolo is None:
                     continue
                 if simbolo.clase == "parametro":
@@ -134,7 +202,7 @@ class Semantico:
                 simbolo.inicializada = True
         elif isinstance(s, Escribir):
             for e in s.elementos:
-                self.expresion(e)
+                self.expresion(e, arreglo=True)
         elif isinstance(s, Si):
             for condicion, cuerpo in s.ramas:
                 self.condicion(condicion)
@@ -159,7 +227,9 @@ class Semantico:
         if s.variable.lower() in self.variables_do:
             self.error(s.linea, 8, f"{s.variable} ya controla un do exterior")
         if simbolo is not None:
-            if simbolo.tipo != "integer":
+            if simbolo.dimension is not None:
+                self.error(s.linea, 7, f"{s.variable} es un arreglo")
+            elif simbolo.tipo != "integer":
                 self.error(s.linea, 7, f"{s.variable} es {simbolo.tipo}")
             if simbolo.clase == "parametro":
                 self.error(s.linea, 10, s.variable)
@@ -195,6 +265,27 @@ class Semantico:
             return
         self.error(linea, 4, f"{nombre} es {destino} y el valor es {origen}")
 
+    def revisa_tamano(self, elementos, expresion, linea, nombre):
+        # un escalar llena todo el arreglo; otro arreglo debe tener los mismos elementos
+        tamano = getattr(expresion, "tamano", None)
+        if tamano is not None and tamano != elementos:
+            self.error(linea, 21, f"{nombre} tiene {elementos} elementos y el valor tiene {tamano}")
+
+    def revisa_indice(self, simbolo, indice, linea, nombre):
+        tipo = self.expresion(indice)
+        if simbolo is None:
+            return
+        if simbolo.dimension is None:
+            self.error(linea, 20, nombre)
+            return
+        if tipo is not None and tipo != "integer":
+            self.error(linea, 16, f"{nombre}({tipo})")
+            return
+        valor = self.evalua(indice)
+        inferior, superior = simbolo.dimension
+        if isinstance(valor, int) and not inferior <= valor <= superior:
+            self.error(linea, 17, f"{nombre}({valor}), el rango es {inferior}:{superior}")
+
     # expresiones: regresan el tipo o None si hubo error
 
     def simbolo(self, nombre, linea):
@@ -212,9 +303,15 @@ class Semantico:
         self.advertencia(linea, f"'{nombre}' no esta declarada, se toma como {tipo} (tipo implicito)")
         return simbolo
 
-    def expresion(self, nodo):
+    def expresion(self, nodo, arreglo=False):
+        # arreglo indica si ahi se acepta un arreglo completo (print, asignacion, size, sum...)
+        nodo.tamano = None
         tipo = self._expresion(nodo)
         nodo.tipo = tipo
+        if tipo is not None and nodo.tamano is not None and not arreglo:
+            nombre = nodo.nombre if isinstance(nodo, Variable) else "[...]"
+            self.error(nodo.linea, 19, nombre)
+            return None
         return tipo
 
     def _expresion(self, nodo):
@@ -228,7 +325,21 @@ class Semantico:
             if not simbolo.inicializada and simbolo.nombre.lower() not in self.avisadas:
                 self.avisadas.add(simbolo.nombre.lower())
                 self.advertencia(nodo.linea, f"la variable '{nodo.nombre}' se usa antes de tener valor")
+            if simbolo.dimension is not None:
+                nodo.tamano = simbolo.elementos
             return simbolo.tipo
+        if isinstance(nodo, Elemento):
+            simbolo = self.simbolo(nodo.nombre, nodo.linea)
+            self.revisa_indice(simbolo, nodo.indice, nodo.linea, nodo.nombre)
+            if simbolo is None or simbolo.dimension is None:
+                return None
+            simbolo.usada = True
+            if not simbolo.inicializada and simbolo.nombre.lower() not in self.avisadas:
+                self.avisadas.add(simbolo.nombre.lower())
+                self.advertencia(nodo.linea, f"el arreglo '{nodo.nombre}' se usa antes de tener valor")
+            return simbolo.tipo
+        if isinstance(nodo, Constructor):
+            return self.constructor(nodo)
         if isinstance(nodo, Unaria):
             tipo = self.expresion(nodo.expresion)
             if tipo is None:
@@ -272,7 +383,36 @@ class Semantico:
         self.error(nodo.linea, 5, detalle)
         return None
 
+    def constructor(self, nodo):
+        tipos = [self.expresion(e) for e in nodo.elementos]
+        if None in tipos:
+            return None
+        if any(t != tipos[0] for t in tipos):
+            self.error(nodo.linea, 22, ", ".join(dict.fromkeys(tipos)))
+            return None
+        nodo.tamano = len(tipos)
+        return tipos[0]
+
+    def funcion_arreglo(self, nodo):
+        if len(nodo.argumentos) != 1:
+            self.error(nodo.linea, 13, f"{nodo.nombre} con {len(nodo.argumentos)} argumentos")
+            return None
+        argumento = nodo.argumentos[0]
+        tipo = self.expresion(argumento, arreglo=True)
+        if tipo is None:
+            return None
+        if argumento.tamano is None:
+            self.error(nodo.linea, 13, f"{nodo.nombre} necesita un arreglo")
+            return None
+        resultado = FUNCIONES_ARREGLO[nodo.nombre]
+        if resultado is None and tipo not in NUMERICOS:
+            self.error(nodo.linea, 13, f"{nodo.nombre} necesita un arreglo numerico")
+            return None
+        return resultado or tipo
+
     def funcion(self, nodo):
+        if nodo.nombre in FUNCIONES_ARREGLO:
+            return self.funcion_arreglo(nodo)
         tipos = [self.expresion(a) for a in nodo.argumentos]
         if nodo.nombre not in FUNCIONES:
             self.error(nodo.linea, 13, nodo.nombre)
