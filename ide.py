@@ -45,6 +45,7 @@ DECLARACIONES = {
     "CHARACTER": "CHARACTER(len=20) :: nombre\n",
     "LOGICAL": "LOGICAL :: listo\n",
     "PARAMETER": "REAL, PARAMETER :: pi = 3.1416\n",
+    "ARREGLO": "INTEGER :: datos(10)\n",
 }
 
 OPERADORES = "+-*/="
