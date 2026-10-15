@@ -7,7 +7,7 @@ TIPOS_DATO = {"INTEGER", "REAL", "DOUBLE", "LOGICAL", "CHARACTER"}
 PALABRAS_RESERVADAS = {
     "PROGRAM", "END", "IMPLICIT", "NONE", "PRECISION", "PARAMETER", "IF", "THEN", "ELSE",
     "ELSEIF", "ENDIF", "DO", "ENDDO", "WHILE", "EXIT", "CYCLE", "STOP", "PRINT", "READ",
-    "USE", "LEN",
+    "USE", "LEN", "DIMENSION",
 }
 
 OPERADORES_PUNTO = {
@@ -58,9 +58,10 @@ PATRON_TOKEN = re.compile(r"""
   | (?P<INVALIDO>\d+[A-Za-z_]\w*)
   | (?P<ENTERO>\d+)
   | (?P<IDENTIFICADOR>[A-Za-z_]\w*)
+  | (?P<CONSTRUCTOR>\(/|/\))
   | (?P<CONCATENACION>//)
   | (?P<OP_RELACIONAL>==|/=|<=|>=|<|>)
-  | (?P<DELIMITADOR>::|[(),:])
+  | (?P<DELIMITADOR>::|[(),:\[\]])
   | (?P<OP_ARITMETICO>\*\*|[+\-*/])
   | (?P<ASIGNACION>=)
   | (?P<DESCONOCIDO>.)
@@ -144,6 +145,9 @@ class Lexico:
             return Token("INVALIDO", valor, linea)
         if tipo == "FIN_LINEA":
             return Token("FIN_LINEA", valor, linea, "\\n")
+        if tipo == "CONSTRUCTOR":
+            # (/ y /) son la forma vieja de [ y ]
+            return Token("DELIMITADOR", valor, linea, "[" if valor == "(/" else "]")
         if tipo == "REAL":
             return Token("REAL", valor, linea, valor.lower().replace("d", "e"))
         return Token(tipo, valor, linea)
