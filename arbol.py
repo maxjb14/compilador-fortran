@@ -25,44 +25,64 @@ class Programa(Nodo):
 
 
 class Declaracion(Nodo):
-    def __init__(self, tipo, longitud, parametro, variables, linea):
+    def __init__(self, tipo, longitud, parametro, variables, linea, dimensiones=None):
         self.tipo = tipo
         self.longitud = longitud
         self.parametro = parametro
         # lista de (nombre, expresion o None, linea)
         self.variables = variables
         self.linea = linea
+        # nombre del arreglo: (limite inferior o None, limite superior)
+        self.dimensiones = dimensiones or {}
 
     def etiqueta(self):
         tipo = self.tipo + (f"({self.longitud})" if self.tipo == "character" else "")
         extra = ", parameter" if self.parametro else ""
-        nombres = ", ".join(n for n, _, _ in self.variables)
+        nombres = ", ".join(n + ("(...)" if n in self.dimensiones else "") for n, _, _ in self.variables)
         return f"Declaracion {tipo}{extra} :: {nombres}"
 
     def hijos(self):
-        return [e for _, e, _ in self.variables if e is not None]
+        nodos = []
+        for nombre, valor, _ in self.variables:
+            if nombre in self.dimensiones:
+                inferior, superior = self.dimensiones[nombre]
+                limites = [superior] if inferior is None else [inferior, superior]
+                nodos.append(Grupo(f"Dimension {nombre}", limites))
+            if valor is not None:
+                nodos.append(valor)
+        return nodos
 
 
 class Asignacion(Nodo):
-    def __init__(self, variable, expresion, linea):
+    def __init__(self, variable, expresion, linea, indice=None):
         self.variable = variable
         self.expresion = expresion
         self.linea = linea
+        self.indice = indice
 
     def etiqueta(self):
-        return f"Asignacion {self.variable} ="
+        destino = self.variable + ("(...)" if self.indice is not None else "")
+        return f"Asignacion {destino} ="
 
     def hijos(self):
+        if self.indice is not None:
+            return [Grupo("Indice", [self.indice]), self.expresion]
         return [self.expresion]
 
 
 class Leer(Nodo):
-    def __init__(self, variables, linea):
+    def __init__(self, variables, linea, indices=None):
         self.variables = variables
         self.linea = linea
+        # indice de cada variable leida, None si no es un elemento de arreglo
+        self.indices = indices or [None] * len(variables)
 
     def etiqueta(self):
-        return "Read " + ", ".join(self.variables)
+        nombres = [v + ("(...)" if i is not None else "") for v, i in zip(self.variables, self.indices)]
+        return "Read " + ", ".join(nombres)
+
+    def hijos(self):
+        return [Grupo(f"Indice {v}", [i]) for v, i in zip(self.variables, self.indices) if i is not None]
 
 
 class Escribir(Nodo):
@@ -203,6 +223,33 @@ class Variable(Nodo):
 
     def etiqueta(self):
         return f"Variable {self.nombre}"
+
+
+class Elemento(Nodo):
+    def __init__(self, nombre, indice, linea):
+        self.nombre = nombre
+        self.indice = indice
+        self.linea = linea
+        self.tipo = None
+
+    def etiqueta(self):
+        return f"Elemento {self.nombre}"
+
+    def hijos(self):
+        return [self.indice]
+
+
+class Constructor(Nodo):
+    def __init__(self, elementos, linea):
+        self.elementos = elementos
+        self.linea = linea
+        self.tipo = None
+
+    def etiqueta(self):
+        return f"Arreglo [{len(self.elementos)}]"
+
+    def hijos(self):
+        return self.elementos
 
 
 class Funcion(Nodo):

@@ -1,5 +1,6 @@
-from arbol import (Asignacion, Binaria, Ciclar, Declaracion, Escribir, Funcion, Hacer, Leer,
-                   Literal, Mientras, Parar, Programa, Salir, Si, Unaria, Variable)
+from arbol import (Asignacion, Binaria, Ciclar, Constructor, Declaracion, Elemento, Escribir,
+                   Funcion, Hacer, Leer, Literal, Mientras, Parar, Programa, Salir, Si, Unaria,
+                   Variable)
 
 ERRORES_SINTACTICOS = {
     1: "ESPERABA FIN DE INSTRUCCION",
@@ -21,6 +22,8 @@ ERRORES_SINTACTICOS = {
     17: "ESPERABA NONE DESPUES DE IMPLICIT",
     18: "ESPERABA UN OPERADOR RELACIONAL (==) Y SE ENCONTRO =",
     20: "INSTRUCCION DESPUES DE END PROGRAM",
+    21: "ESPERABA PARAMETER O DIMENSION",
+    22: "ESPERABA UN ]",
 }
 
 
@@ -36,6 +39,8 @@ class Sintactico:
         self.lexico = lexico
         self.traza = traza
         self.mensajes = []
+        # nombres declarados como arreglo: a(i) es un elemento y no una funcion
+        self.arreglos = set()
 
     def analizar(self):
         self.reporta("INICIO DE ANALISIS SINTACTICO")
@@ -151,17 +156,27 @@ class Sintactico:
             longitud = self.longitud_cadena()
 
         parametro = False
-        if self.ver().norma == ",":
+        dimension = None
+        while self.ver().norma == ",":
             self.token()
-            if not self.es_palabra(self.token(), "PARAMETER"):
-                self.errores(5)
-            parametro = True
+            atributo = self.token()
+            if self.es_palabra(atributo, "PARAMETER"):
+                parametro = True
+            elif self.es_palabra(atributo, "DIMENSION"):
+                dimension = self.limites()
+            else:
+                self.errores(21, atributo)
         if self.ver().norma == "::":
             self.token()
 
         variables = []
+        dimensiones = {}
         while True:
             nombre = self.espera_identificador()
+            limites = self.limites() if self.ver().norma == "(" else dimension
+            if limites is not None:
+                dimensiones[nombre.valor] = limites
+                self.arreglos.add(nombre.valor.lower())
             valor = None
             if self.ver().norma == "=":
                 self.token()
@@ -170,7 +185,19 @@ class Sintactico:
             if self.ver().norma != ",":
                 break
             self.token()
-        return Declaracion(tipo, longitud, parametro, variables, linea)
+        return Declaracion(tipo, longitud, parametro, variables, linea, dimensiones)
+
+    def limites(self):
+        # (n) o (inferior:superior)
+        self.regla("DIMENSION")
+        self.espera_valor("(", 11)
+        superior = self.expresion()
+        inferior = None
+        if self.ver().norma == ":":
+            self.token()
+            inferior, superior = superior, self.expresion()
+        self.espera_valor(")", 4)
+        return inferior, superior
 
     def longitud_cadena(self):
         # character(len=n), character(n) o character*n
@@ -309,9 +336,19 @@ class Sintactico:
 
     def asignacion(self):
         self.regla("ASIGNACION")
-        nombre = self.token()
+        nombre, indice = self.destino()
         self.espera_valor("=", 3)
-        return Asignacion(nombre.valor, self.expresion(), nombre.linea)
+        return Asignacion(nombre.valor, self.expresion(), nombre.linea, indice)
+
+    def destino(self):
+        # variable o elemento de arreglo que recibe un valor
+        nombre = self.espera_identificador()
+        indice = None
+        if self.ver().norma == "(":
+            self.token()
+            indice = self.expresion()
+            self.espera_valor(")", 4)
+        return nombre, indice
 
     def formato_lista(self):
         if self.token().norma != "*":
@@ -323,11 +360,15 @@ class Sintactico:
         self.formato_lista()
         if self.token().norma != ",":
             self.errores(10)
-        variables = [self.espera_identificador().valor]
-        while self.ver().norma == ",":
+        variables, indices = [], []
+        while True:
+            nombre, indice = self.destino()
+            variables.append(nombre.valor)
+            indices.append(indice)
+            if self.ver().norma != ",":
+                break
             self.token()
-            variables.append(self.espera_identificador().valor)
-        return Leer(variables, linea)
+        return Leer(variables, linea, indices)
 
     def escritura(self):
         self.regla("ESCRITURA")
@@ -430,12 +471,34 @@ class Sintactico:
             nodo = self.expresion()
             self.espera_valor(")", 4)
             return nodo
+        if token.norma == "[":
+            return self.constructor(token)
         if token.tipo == "IDENTIFICADOR" or (token.tipo == "TIPO_DATO" and token.norma == "REAL"):
             if self.ver().norma == "(":
+                if token.tipo == "IDENTIFICADOR" and token.valor.lower() in self.arreglos:
+                    return self.elemento(token)
                 return self.funcion(token)
             if token.tipo == "IDENTIFICADOR":
                 return Variable(token.valor, token.linea)
         self.errores(7, token)
+
+    def elemento(self, nombre):
+        self.regla("ELEMENTO")
+        self.token()
+        indice = self.expresion()
+        self.espera_valor(")", 4)
+        return Elemento(nombre.valor, indice, nombre.linea)
+
+    def constructor(self, inicio):
+        # [a, b, c] o (/ a, b, c /)
+        self.regla("CONSTRUCTOR")
+        elementos = [self.expresion()]
+        while self.ver().norma == ",":
+            self.token()
+            elementos.append(self.expresion())
+        if self.token().norma != "]":
+            self.errores(22)
+        return Constructor(elementos, inicio.linea)
 
     def funcion(self, nombre):
         self.token()
