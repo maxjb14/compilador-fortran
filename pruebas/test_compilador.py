@@ -95,10 +95,7 @@ class PruebasSemantico(unittest.TestCase):
         self.assertIn("ERROR SEMANTICO 8", self.errores(programa("  DO i = 1, 3\n    i = 2\n  END DO")))
 
     def test_do_anidado_con_la_misma_variable(self):
-        cuerpo = "  DO i = 1, 2
-    DO i = 1, 3
-    END DO
-  END DO"
+        cuerpo = "  DO i = 1, 2\n    DO i = 1, 3\n    END DO\n  END DO"
         self.assertIn("ERROR SEMANTICO 8", self.errores(programa(cuerpo)))
 
     def test_variable_con_nombre_del_programa(self):
