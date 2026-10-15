@@ -30,6 +30,7 @@ Al compilar sin errores se guarda el código objeto en un archivo `.obj` junto a
 IDE (necesita `customtkinter`):
 
 ```
+pip install -r requirements.txt
 python ide.py
 ```
 
